@@ -68,12 +68,17 @@ static std::string read_text(std::string path) {
 }
 
 static float cross_entropy(const ggml_tensor *input, const ggml_tensor *target) {
-    CHATGLM_CHECK(ggml_is_contiguous(input) && input->n_dims == 2 && input->type == GGML_TYPE_F32);
-    CHATGLM_CHECK(ggml_is_contiguous(target) && target->n_dims == 1 && target->type == GGML_TYPE_I32);
+    // CHATGLM_CHECK(ggml_is_contiguous(input) && input->n_dims == 2 && input->type == GGML_TYPE_F32);
+    // CHATGLM_CHECK(ggml_is_contiguous(target) && target->n_dims == 1 && target->type == GGML_TYPE_I32);
     CHATGLM_CHECK(input->ne[1] == target->ne[0]);
 
     const int num_classes = input->ne[0];
     const int batch_size = input->ne[1];
+
+    std::cout << input->ne[0] << "----" << input->ne[1] << std::endl;
+    std::cout << "-----"<<std::endl;
+    std::cout << target->ne[0] << "----" << target->ne[1] << std::endl;
+    std::cout << "-----"<<std::endl;
 
     float loss = 0.f;
 #pragma omp parallel for reduction(+ : loss)
@@ -81,6 +86,7 @@ static float cross_entropy(const ggml_tensor *input, const ggml_tensor *target) 
         const int target_i = ((const int *)target->data)[i];
         const float *row = (const float *)input->data + i * input->ne[0];
         const float max_val = *std::max_element(row, row + num_classes);
+        // std::cout << max_val << std::endl;
         float sum = 0.f;
         for (int j = 0; j < num_classes; j++) {
             sum += std::exp(row[j] - max_val);
@@ -115,15 +121,30 @@ static void perplexity(Args &args) {
         size_t target_len = std::min(end - prev_end, size_t(args.max_length - 1));
         std::vector<int> input_ids(corpus_ids.begin() + begin, corpus_ids.begin() + end);
 
+        std::cout << "input_ids.size(): "<< input_ids.size() << std::endl; // 1024?
+        std::cout << "target_len"<< target_len << std::endl; 
+
         ggml_tensor *lm_logits = pipeline.model->forward_graph_compute(input_ids, 0, 0, args.num_threads, false);
 
         const auto clk_fwd = std::chrono::system_clock::now();
 
         auto ctx = chatglm::make_unique_ggml_context(512 * chatglm::MB, nullptr, false);
+        
+        // std::cout << "debug lm_logit"  << lm_logits->ne[0] << ";" << target_len << ";" << lm_logits->nb[1] <<";" << (input_ids.size()-target_len-1) * lm_logits->nb[1] << std::endl;
+
+        // 65024;2048;2047;4;260096;0
+        std::cout << "debug lm_logit"  << lm_logits->ne[0] << ";" << lm_logits->ne[1] << ";"<< target_len << ";" << lm_logits->nb[0] << ";"<< lm_logits->nb[1] <<";" << (input_ids.size()-target_len-1) * lm_logits->nb[1] << std::endl;
         ggml_tensor *next_lm_logits = ggml_view_2d(ctx.get(), lm_logits, lm_logits->ne[0], target_len, lm_logits->nb[1],
                                                    (input_ids.size() - target_len - 1) * lm_logits->nb[1]);
         ggml_tensor *next_input_ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, target_len);
         memcpy(next_input_ids->data, input_ids.data() + input_ids.size() - target_len, target_len * sizeof(int));
+
+        // std::cout << "Debug input:" << std::endl;
+        // std::cout << "input->data: ";
+        // for (int i = 0; i < next_lm_logits->ne[0] * next_lm_logits->ne[1]; i++) {
+        //     std::cout << ((float *)next_lm_logits->data)[i] << " ";
+        // }
+        // std::cout << std::endl;
 
         const float loss = cross_entropy(next_lm_logits, next_input_ids);
 

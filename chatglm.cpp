@@ -46,7 +46,7 @@ namespace chatglm {
 static std::string shape_to_string(ggml_tensor *tensor) {
     std::ostringstream oss;
     oss << '[';
-    for (int i = tensor->n_dims - 1; i >= 0; i--) {
+    for (int i = ggml_n_dims(tensor) - 1; i >= 0; i--) {
         oss << tensor->ne[i] << (i > 0 ? ", " : "");
     }
     oss << ']';
@@ -56,7 +56,7 @@ static std::string shape_to_string(ggml_tensor *tensor) {
 static std::string strides_to_string(ggml_tensor *tensor) {
     std::ostringstream oss;
     oss << '[';
-    for (int i = tensor->n_dims - 1; i >= 0; i--) {
+    for (int i = ggml_n_dims(tensor) - 1; i >= 0; i--) {
         oss << tensor->nb[i] << (i > 0 ? ", " : "");
     }
     oss << ']';
@@ -68,13 +68,13 @@ std::string to_string(ggml_tensor *tensor, bool with_data) {
     oss << "ggml_tensor(";
 
     if (with_data) {
-        if (tensor->n_dims > 3)
+        if (ggml_n_dims(tensor) > 3)
             oss << "[";
         for (int i3 = 0; i3 < tensor->ne[3]; i3++) {
-            if (tensor->n_dims > 2)
+            if (ggml_n_dims(tensor) > 2)
                 oss << (i3 > 0 ? ",\n\n[" : "[");
             for (int i2 = 0; i2 < tensor->ne[2]; i2++) {
-                if (tensor->n_dims > 1)
+                if (ggml_n_dims(tensor) > 1)
                     oss << (i2 > 0 ? ",\n\n[" : "[");
                 for (int i1 = 0; i1 < tensor->ne[1]; i1++) {
                     oss << (i1 > 0 ? ",\n[" : "[");
@@ -98,13 +98,13 @@ std::string to_string(ggml_tensor *tensor, bool with_data) {
                     }
                     oss << "]";
                 }
-                if (tensor->n_dims > 1)
+                if (ggml_n_dims(tensor) > 1)
                     oss << "]";
             }
-            if (tensor->n_dims > 2)
+            if (ggml_n_dims(tensor) > 2)
                 oss << "]";
         }
-        if (tensor->n_dims > 3)
+        if (ggml_n_dims(tensor) > 3)
             oss << "]";
         oss << ", ";
     }
@@ -171,7 +171,7 @@ void ggml_graph_compute_helper(std::vector<uninitialized_char> &buf, ggml_cgraph
 
 // for debugging purpose
 [[maybe_unused]] static inline ggml_tensor *add_zero(ggml_context *ctx, ggml_tensor *tensor) {
-    ggml_tensor *zeros = ggml_new_tensor(ctx, tensor->type, tensor->n_dims, tensor->ne);
+    ggml_tensor *zeros = ggml_new_tensor(ctx, tensor->type, ggml_n_dims(tensor), tensor->ne);
     ggml_set_f32(zeros, 0);
     tensor_to_device(zeros);
     ggml_tensor *out = tensor_assign_buffers(ggml_add(ctx, tensor, zeros));
@@ -410,7 +410,7 @@ void *ModelLoader::read_tensor_data(size_t nbytes) {
 }
 
 void ModelLoader::read_tensor(const std::string &name, ggml_tensor *tensor) {
-    checked_read_tensor_meta(name, tensor->n_dims, tensor->ne, tensor->type);
+    checked_read_tensor_meta(name, ggml_n_dims(tensor), tensor->ne, tensor->type);
     tensor->data = read_tensor_data(ggml_nbytes(tensor));
 }
 
@@ -564,8 +564,8 @@ static ggml_tensor *apply_rotary_emb_glm(ModelContext *ctx, ggml_tensor *layer, 
     a1_rope = ggml_cpy(gctx, a1_rope, a1);
     a2_rope = ggml_cpy(gctx, a2_rope, a2);
 #endif
-    ggml_build_forward_expand(&ctx->gf, a1_rope);
-    ggml_build_forward_expand(&ctx->gf, a2_rope);
+    ggml_build_forward_expand(ctx->gf, a1_rope);
+    ggml_build_forward_expand(ctx->gf, a2_rope);
 
     return layer;
 }
@@ -603,7 +603,7 @@ static ggml_tensor *apply_attention_mask_glm(ModelContext *ctx, ggml_tensor *att
     ggml_tensor *masked_attn_scores = tensor_assign_buffers(
         ggml_view_3d(gctx, attn_scores, 1, qlen - 1, num_attention_heads, qlen * ggml_element_size(attn_scores),
                      qlen * qlen * ggml_element_size(attn_scores), (qlen - 1) * ggml_element_size(attn_scores)));
-    ggml_build_forward_expand(&ctx->gf, ggml_cpy(gctx, inf, masked_attn_scores));
+    ggml_build_forward_expand(ctx->gf, ggml_cpy(gctx, inf, masked_attn_scores));
     return attn_scores;
 }
 
@@ -674,11 +674,11 @@ ggml_tensor *BasicAttention::forward(ModelContext *ctx, ggml_tensor *hidden_stat
     ggml_tensor *k_cache_view = tensor_assign_buffers(
         ggml_view_3d(gctx, k_cache, head_size, qlen, num_kv_heads, k_cache->nb[1], k_cache->nb[2],
                      n_past * head_size * ggml_element_size(k_cache))); // [kv_heads, qlen, head_size]
-    ggml_build_forward_expand(&ctx->gf, ggml_cpy(gctx, key_layer, k_cache_view));
+    ggml_build_forward_expand(ctx->gf, ggml_cpy(gctx, key_layer, k_cache_view));
     ggml_tensor *v_cache_view =
         tensor_assign_buffers(ggml_view_3d(gctx, v_cache, qlen, head_size, num_kv_heads, v_cache->nb[1], v_cache->nb[2],
                                            n_past * ggml_element_size(v_cache))); // [kv_heads, head_size, qlen]
-    ggml_build_forward_expand(&ctx->gf, ggml_cpy(gctx, value_layer, v_cache_view));
+    ggml_build_forward_expand(ctx->gf, ggml_cpy(gctx, value_layer, v_cache_view));
 
     // concat key & value with past kv
     key_layer = tensor_assign_buffers(ggml_view_3d(gctx, k_cache, head_size, n_past + qlen, num_kv_heads,
@@ -692,7 +692,7 @@ ggml_tensor *BasicAttention::forward(ModelContext *ctx, ggml_tensor *hidden_stat
     ggml_tensor *attn_scores =
         tensor_assign_buffers(ggml_mul_mat(gctx, key_layer, query_layer)); // [kv_heads, shared_qheads * qlen, klen]
     attn_scores =
-        tensor_assign_buffers(ggml_scale_inplace(gctx, attn_scores, ggml_new_f32(gctx, 1.f / std::sqrt(head_size))));
+        tensor_assign_buffers(ggml_scale_inplace(gctx, attn_scores, 1.f / std::sqrt(head_size)));
     if (use_alibi) {
         attn_scores = tensor_assign_buffers(ggml_alibi(gctx, attn_scores, n_past, num_attention_heads, 8));
     }
@@ -747,7 +747,8 @@ BaseModelForCausalLM::BaseModelForCausalLM(ModelConfig config, size_t mem_size, 
 ggml_tensor *BaseModelForCausalLM::forward_graph_compute(const std::vector<int> &input_ids, int n_past, int n_ctx,
                                                          int n_threads, bool is_decoding) {
     ctx_.ctx_b = make_unique_ggml_context(ctx_.compute_buffer.size(), ctx_.compute_buffer.data(), false);
-    ctx_.gf = {};
+    // ctx_.gf = {};
+    ctx_.gf = ggml_new_graph(ctx_.ctx_b.get());
 
     if (n_threads <= 0) {
         n_threads = get_default_num_threads(); // default thread num
@@ -763,17 +764,18 @@ ggml_tensor *BaseModelForCausalLM::forward_graph_compute(const std::vector<int> 
     ggml_tensor *lm_logits = forward(&ctx_, curr_input_ids, n_past, n_ctx, is_decoding);
     lm_logits->backend = GGML_BACKEND_CPU;
 
-    ggml_build_forward_expand(&ctx_.gf, lm_logits);
+    ggml_build_forward_expand(ctx_.gf, lm_logits);
 #ifdef GGML_USE_METAL
-    ggml_metal_graph_compute(ctx_.ctx_metal.get(), &ctx_.gf);
+    ggml_metal_graph_compute(ctx_.ctx_metal.get(), ctx_.gf);
 #else
-    ggml_graph_compute_helper(ctx_.work_buffer, &ctx_.gf, n_threads);
+    ggml_graph_compute_helper(ctx_.work_buffer, ctx_.gf, n_threads);
 #endif
 
 #ifdef GGML_PERF
     ggml_graph_print(&ctx_.gf);
 #endif
 
+    // std::cout << lm_logits -> ne[1] << std::endl;
     return lm_logits;
 }
 
@@ -1088,18 +1090,18 @@ ggml_tensor *GLMBlock::forward(ModelContext *ctx, ggml_tensor *hidden_states, gg
                                int n_ctx) const {
     ggml_context *gctx = ctx->ctx_b.get();
 
-    ggml_tensor *alpha = ggml_new_f32(gctx, alpha_value);
+    // ggml_tensor *alpha = ggml_new_f32(gctx, alpha_value);
 
     ggml_tensor *attn_input = input_layernorm.forward(ctx, hidden_states);
     ggml_tensor *attn_output = attention.forward(ctx, attn_input, position_ids, n_past, n_ctx);
-    ggml_build_forward_expand(&ctx->gf, attn_output);
-    attn_input = tensor_assign_buffers(ggml_scale_inplace(gctx, attn_input, alpha));
+    ggml_build_forward_expand(ctx->gf, attn_output);
+    attn_input = tensor_assign_buffers(ggml_scale_inplace(gctx, attn_input, alpha_value));
     hidden_states = tensor_assign_buffers(ggml_add_inplace(gctx, attn_input, attn_output));
 
     ggml_tensor *mlp_input = post_attention_layernorm.forward(ctx, hidden_states);
     ggml_tensor *mlp_output = mlp.forward(ctx, mlp_input);
-    ggml_build_forward_expand(&ctx->gf, mlp_output);
-    mlp_input = tensor_assign_buffers(ggml_scale_inplace(gctx, mlp_input, alpha));
+    ggml_build_forward_expand(ctx->gf, mlp_output);
+    mlp_input = tensor_assign_buffers(ggml_scale_inplace(gctx, mlp_input, alpha_value));
     ggml_tensor *output = tensor_assign_buffers(ggml_add_inplace(gctx, mlp_input, mlp_output));
 
     return output;
@@ -1244,7 +1246,7 @@ void ChatGLM2ForCausalLM::load(ModelLoader &loader) {
             ggml_tensor *up_proj = it->second;
 
             int64_t target_ne[4]{gate_proj->ne[0], gate_proj->ne[1] + up_proj->ne[1]};
-            loader.checked_read_tensor_meta(dense_h_to_4h_name, gate_proj->n_dims, target_ne, gate_proj->type);
+            loader.checked_read_tensor_meta(dense_h_to_4h_name, ggml_n_dims(gate_proj), target_ne, gate_proj->type);
             gate_proj->data = loader.read_tensor_data(ggml_nbytes(gate_proj));
             up_proj->data = loader.read_tensor_data(ggml_nbytes(up_proj));
         } else {
